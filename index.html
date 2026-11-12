@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>رادار الخروج — استثمار 1–3 أشهر</title>
+  <meta name="theme-color" content="#070b12">
+  <meta name="description" content="رادار يكشف العملات التي يخرج منها المستثمرون على أفق شهر إلى ثلاثة أشهر">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="stylesheet" href="app.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div class="header-top">
+        <div>
+          <h1 class="title">رادار الخروج</h1>
+          <p class="subtitle">كشف خروج المستثمرين · أفق 1–3 أشهر</p>
+        </div>
+        <button type="button" id="btn-settings" class="btn-icon" title="الإعدادات" aria-label="الإعدادات">⚙</button>
+      </div>
+      <div class="horizon-tabs" role="tablist">
+        <button type="button" class="tab active" data-horizon="30" role="tab">شهر واحد</button>
+        <button type="button" class="tab" data-horizon="90" role="tab">ثلاثة أشهر</button>
+      </div>
+    </header>
+
+    <section class="toolbar">
+      <div class="status" id="status">جاهز للمسح</div>
+      <div class="toolbar-actions">
+        <button type="button" id="btn-scan" class="btn primary">مسح السوق</button>
+        <button type="button" id="btn-stop" class="btn ghost" hidden>إيقاف</button>
+      </div>
+    </section>
+
+    <section class="filters">
+      <label class="filter">
+        <span>حد السيولة اليومي (USDT)</span>
+        <select id="min-volume">
+          <option value="2000000">2 مليون+</option>
+          <option value="5000000" selected>5 مليون+</option>
+          <option value="10000000">10 مليون+</option>
+          <option value="25000000">25 مليون+</option>
+        </select>
+      </label>
+      <label class="filter">
+        <span>الحد الأقصى للنتائج</span>
+        <select id="max-results">
+          <option value="20">20</option>
+          <option value="40" selected>40</option>
+          <option value="60">60</option>
+        </select>
+      </label>
+    </section>
+
+    <section class="progress-wrap" id="progress-wrap" hidden>
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <p class="progress-text" id="progress-text">جاري الجلب…</p>
+    </section>
+
+    <section class="error-box" id="error-box" hidden></section>
+
+    <main id="results" class="results">
+      <div class="empty" id="empty">
+        <p>اضغط <strong>مسح السوق</strong> لجلب أزواج USDT ذات السيولة وتحليل إشارات خروج المستثمرين على الأفق المختار.</p>
+        <ul class="hints">
+          <li>توزيع بعد صعود (سعر مرتفع + ضعف حجم)</li>
+          <li>انكسار بنية / متوسطات</li>
+          <li>زخم هابط على اليومي والأسبوعي</li>
+        </ul>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <span>بيانات عامة من Binance · يعمل على GitHub Pages</span>
+    </footer>
+  </div>
+
+  <!-- Settings sheet -->
+  <div class="sheet-overlay" id="sheet-overlay" hidden></div>
+  <aside class="sheet" id="settings-sheet" hidden>
+    <div class="sheet-head">
+      <h2>الإعدادات</h2>
+      <button type="button" id="btn-close-settings" class="btn-icon">✕</button>
+    </div>
+    <div class="sheet-body">
+      <p class="sheet-desc">عتبات إشارات «خروج المستثمرين». القيم الافتراضية مناسبة لمعظم الأسواق.</p>
+
+      <label class="field">
+        <span>وزن التوزيع (سعر قرب القمة + ضعف حجم)</span>
+        <input type="range" id="w-dist" min="0" max="40" value="25">
+        <output id="w-dist-out">25</output>
+      </label>
+      <label class="field">
+        <span>وزن انكسار البنية / المتوسطات</span>
+        <input type="range" id="w-struct" min="0" max="40" value="25">
+        <output id="w-struct-out">25</output>
+      </label>
+      <label class="field">
+        <span>وزن الزخم الهابط</span>
+        <input type="range" id="w-mom" min="0" max="40" value="25">
+        <output id="w-mom-out">25</output>
+      </label>
+      <label class="field">
+        <span>وزن تراجع الحجم</span>
+        <input type="range" id="w-vol" min="0" max="40" value="25">
+        <output id="w-vol-out">25</output>
+      </label>
+
+      <label class="field check">
+        <input type="checkbox" id="exclude-majors" checked>
+        <span>استبعاد الكبار جداً (BTC / ETH) من قائمة الخروج</span>
+      </label>
+
+      <button type="button" id="btn-reset-weights" class="btn ghost full">إعادة العتبات الافتراضية</button>
+    </div>
+  </aside>
+
+  <script src="app.js"></script>
+</body>
+</html>
