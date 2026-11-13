@@ -33,6 +33,7 @@
     whales: [],
     invest: [],
     flow: [],
+    rebound: [],
     exits: [],
     selected: null,
     settings: {
@@ -69,6 +70,7 @@
       whales: $("panel-whales"),
       flow: $("panel-flow"),
       invest: $("panel-invest"),
+      rebound: $("panel-rebound"),
       exit: $("panel-exit"),
       layers: $("panel-layers"),
     },
@@ -547,6 +549,22 @@
         .sort((a, b) => Math.abs(b.flow.strength) - Math.abs(a.flow.strength) || b.quoteVolume - a.quoteVolume)
         .slice(0, maxN);
 
+      // ارتداد: هبوط قوي ثم بوادر طبقات شراء (سبوت فقط)
+      state.rebound = ok
+        .filter((x) => {
+          const drop30 = x.change30 != null ? x.change30 : 0;
+          const dropFromHigh = x.dropFromHigh30 != null ? x.dropFromHigh30 : 0;
+          const strongDip = drop30 <= -0.12 || dropFromHigh >= 0.15;
+          const recovering = x.passed >= 4 && (x.layers.trend || x.layers.mom || x.layers.struct);
+          return strongDip && recovering && x.exitScore < 70;
+        })
+        .sort((a, b) => {
+          const da = a.dropFromHigh30 || Math.abs(Math.min(0, a.change30 || 0));
+          const db = b.dropFromHigh30 || Math.abs(Math.min(0, b.change30 || 0));
+          return db - da || b.passed - a.passed;
+        })
+        .slice(0, maxN);
+
       state.invest = ok
         .filter((x) => x.investScore >= 55 && x.dailyUp && x.exitScore < 50)
         .sort((a, b) => b.investScore - a.investScore || (b.change90 || 0) - (a.change90 || 0))
@@ -563,9 +581,9 @@
       setStatus(
         "فرص " + state.results.length +
         " · دخول " + state.entries.length +
-        " · تدفق " + state.flow.length +
+        " · ارتداد " + state.rebound.length +
         " · استثمار " + state.invest.length +
-        " · خروج " + state.exits.length
+        " · حذر " + state.exits.length
       );
     } catch (e) {
       if (e.name === "AbortError") setStatus("تم الإيقاف");
@@ -693,7 +711,7 @@
         ${row.whale?.dominant === "sell" ? '<span class="chip r">حوت بيع</span>' : ""}
         ${row.layers.trend ? '<span class="chip g">اتجاه</span>' : ""}
       </div>
-      <p class="hint">تدفق أوامر تقريبي (Buy/Sell Delta + CVD) على فريم 1س — نفس فكرة Volume Flow / CVD في Cryptometer.</p>
+      <p class="hint">Order Flow تقريبي (Buy/Sell + CVD) على 1س — بنفس منطق Cryptometer.com</p>
       ${links(row)}
     </article>`;
   }
@@ -703,7 +721,7 @@
     if (!p) return;
     if (!state.flow.length) {
       p.innerHTML = `<div class="empty">
-        <p><strong>التدفق (Order Flow)</strong> — مستوحى من Cryptometer: من يضغط أكثر، المشترون أم البائعون؟</p>
+        <p><strong>Cryptometer</strong> — من يضغط أكثر: المشترون أم البائعون؟ (Order Flow / CVD)</p>
         <ul>
           <li><strong>شريط أخضر/أحمر:</strong> نسبة حجم الشراء العدواني مقابل البيع</li>
           <li><strong>تباين صاعد:</strong> السعر ينزل والتدفق شراء → غالباً امتصاص (فرصة مراقبة للشراء)</li>
@@ -714,6 +732,60 @@
       return;
     }
     p.innerHTML = state.flow.map(cardFlow).join("");
+    bindLayerButtons(p);
+  }
+
+
+  function cardRebound(row) {
+    const drop30 = row.change30 != null ? row.change30 : null;
+    const fromHi = row.dropFromHigh30 != null ? row.dropFromHigh30 : null;
+    const dropLabel = fromHi != null ? ("−" + (fromHi * 100).toFixed(1) + "% من القمة") : fmtPct(drop30);
+    const moon = row.passed >= 6 ? "قمر محتمل" : row.passed >= 5 ? "ارتداد قوي" : "مراقبة ارتداد";
+    const bclass = row.passed >= 6 ? "ok" : row.passed >= 5 ? "warn" : "blue";
+    return `<article class="card">
+      <div class="card-h">
+        <div class="sym-block">
+          <div class="sym">${esc(row.base)}<small>/USDT</small></div>
+          ${priceBlock(row)}
+        </div>
+        <div class="badge ${bclass}">${moon}</div>
+      </div>
+      <div class="grid4">
+        <div class="cell"><span class="l">الهبوط من القمة</span><span class="v neg">${fromHi != null ? ("−" + (fromHi * 100).toFixed(1) + "%") : "—"}</span></div>
+        <div class="cell"><span class="l">تغيّر 30 يوم</span><span class="v ${chgClass(drop30 || 0)}">${fmtPct(drop30)}</span></div>
+        <div class="cell"><span class="l">الطبقات</span><span class="v hl">${row.passed}/7</span></div>
+        <div class="cell"><span class="l">90 يوم</span><span class="v ${chgClass(row.change90 || 0)}">${fmtPct(row.change90)}</span></div>
+      </div>
+      <div class="layers-row">${layerDots(row.layers)}</div>
+      <div class="chips">
+        <span class="chip a">بعد هبوط</span>
+        ${row.passed >= 5 ? '<span class="chip g">طبقات شراء</span>' : '<span class="chip">بناء طبقات</span>'}
+        ${row.layers.struct ? '<span class="chip g">بنية</span>' : ""}
+        ${row.layers.trend ? '<span class="chip g">اتجاه</span>' : ""}
+        ${row.flow && row.flow.div === "bullish" ? '<span class="chip g">امتصاص</span>' : ""}
+        ${row.whale?.dominant === "buy" ? '<span class="chip g">حوت شراء</span>' : ""}
+      </div>
+      <p class="hint">فكرة الشراء من الدعم بعد الهبوط: انتظر اكتمال 5/7 على الأقل، وضع ستوب تحت القاع الأخير. ليست ضماناً للصعود.</p>
+      ${links(row)}
+    </article>`;
+  }
+
+  function renderRebound() {
+    const p = els.panels.rebound;
+    if (!p) return;
+    if (!state.rebound.length) {
+      p.innerHTML = `<div class="empty">
+        <p><strong>ارتداد (شراء بعد هبوط)</strong> — عملات هبطت بقوة ثم بدأت طبقات الشراء تعود.</p>
+        <ul>
+          <li>يعرض نسبة الهبوط من قمة ~30 يوم</li>
+          <li>يشترط بوادر 4–7 طبقات (اتجاه/زخم/بنية…)</li>
+          <li>مناسب لسبوت: شراء من منطقة منخفضة لا ملاحقة قمة</li>
+          <li>الأفضل: 5/7+ مع تدفق شراء أو حوت شراء</li>
+        </ul>
+      </div>`;
+      return;
+    }
+    p.innerHTML = state.rebound.map(cardRebound).join("");
     bindLayerButtons(p);
   }
 
@@ -775,14 +847,14 @@
           <div class="sym">${esc(row.base)}<small>/USDT</small></div>
           ${priceBlock(row)}
         </div>
-        <div class="badge bad">خروج ${Math.round(row.exitScore)}</div>
+        <div class="badge bad">حذر ${Math.round(row.exitScore)}</div>
       </div>
       <div class="grid3">
         <div class="cell"><span class="l">طبقات</span><span class="v">${row.passed}/7</span></div>
         <div class="cell"><span class="l">30 يوم</span><span class="v ${chgClass(row.change30 || 0)}">${fmtPct(row.change30)}</span></div>
         <div class="cell"><span class="l">حجم</span><span class="v">${fmtVol(row.quoteVolume)}</span></div>
       </div>
-      <p class="hint"><strong>كيف تستغله:</strong> ليست إشارة بيع قصير بالضرورة. استخدمها لـ (1) تجنب الشراء المتأخر بعد موجة (2) تضييق أهداف صفقاتك المفتوحة (3) مراقبة انكسار يومي قبل زيادة المخاطرة.</p>
+      <p class="hint"><strong>للسبوت فقط:</strong> لا يعني «بع على المكشوف». يعني: الشراء هنا متأخر/خطر. انتظر ارتداداً أو دعماً أو تجاهل المطاردة.</p>
       ${links(row)}
     </article>`;
   }
@@ -791,7 +863,7 @@
     root.querySelectorAll(".btn-layers").forEach((btn) => {
       btn.addEventListener("click", () => {
         const sym = btn.getAttribute("data-sym");
-        const pools = [state.results, state.entries, state.whales, state.flow, state.invest, state.exits];
+        const pools = [state.results, state.entries, state.whales, state.flow, state.invest, state.rebound, state.exits];
         state.selected = null;
         for (const pool of pools) {
           const f = pool.find((r) => r.symbol === sym);
@@ -851,11 +923,11 @@
   function renderExit() {
     const p = els.panels.exit;
     if (!state.exits.length) {
-      p.innerHTML = `<div class="empty"><p><strong>الخروج</strong> — ضغط توزيع / ضعف بنية.</p>
+      p.innerHTML = `<div class="empty"><p><strong>حذر (للشراء سبوت فقط)</strong> — عملات قرب قمة أو عليها توزيع. ليس بيعاً قصيراً.</p>
         <ul>
-          <li>لا تستخدمه وحده لفتح بيع</li>
-          <li>تجنّب مطاردة القمم</li>
-          <li>راجع صفقاتك المفتوحة إذا ظهرت عملتك هنا</li>
+          <li>أنت تشتري سبوت: هذا التبويب يقول <strong>لا تلاحق الصعود الآن</strong></li>
+          <li>فضّل الشراء من تبويب <strong>ارتداد</strong> بعد هبوط</li>
+          <li>إن كانت عملة عندك رابحة وظهرت هنا: فكّر بجني جزء من الربح</li>
         </ul></div>`;
       return;
     }
@@ -905,6 +977,7 @@
     renderWhales();
     renderFlow();
     renderInvest();
+    renderRebound();
     renderExit();
     renderLayers();
   }

@@ -52,13 +52,13 @@ body {
 .topbar h1 { margin: 0; font-size: 1.28rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
 .tagline { margin: 3px 0 0; font-size: 0.78rem; color: var(--muted); }
 .tabs {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;
   margin-bottom: 12px; background: rgba(10,16,28,0.85);
   border: 1px solid var(--line); border-radius: 16px; padding: 6px;
 }
 .tab {
   border: 0; background: transparent; color: var(--muted); font-family: inherit;
-  font-size: 0.82rem; font-weight: 600; padding: 11px 4px; border-radius: 12px;
+  font-size: 0.75rem; font-weight: 600; padding: 10px 2px; border-radius: 12px;
   cursor: pointer; min-height: 44px;
 }
 .tab.active {
@@ -223,7 +223,8 @@ body {
 .field.check { flex-direction: row; align-items: flex-start; gap: 10px; color: var(--text); }
 .field.check input { margin-top: 3px; width: 18px; height: 18px; }
 @media (min-width: 520px) {
-  .tabs { grid-template-columns: repeat(7, 1fr); }
+  .tabs { grid-template-columns: repeat(4, 1fr); }
+  .tab { font-size: 0.78rem; }
   .ly { font-size: 0.7rem; padding: 10px 3px; }
 }
 
