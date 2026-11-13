@@ -32,6 +32,7 @@
     entries: [],
     whales: [],
     invest: [],
+    flow: [],
     exits: [],
     selected: null,
     settings: {
@@ -66,6 +67,7 @@
       radar: $("panel-radar"),
       entry: $("panel-entry"),
       whales: $("panel-whales"),
+      flow: $("panel-flow"),
       invest: $("panel-invest"),
       exit: $("panel-exit"),
       layers: $("panel-layers"),
@@ -136,7 +138,7 @@
       { signal }
     );
     return raw.map((c) => ({
-      t: c[0], o: +c[1], h: +c[2], l: +c[3], c: +c[4], v: +c[5], qv: +c[7],
+      t: c[0], o: +c[1], h: +c[2], l: +c[3], c: +c[4], v: +c[5], qv: +c[7], tbq: +c[10],
     }));
   }
 
@@ -211,6 +213,59 @@
     const b = closes[closes.length - 1];
     if (!a) return null;
     return (b - a) / a;
+  }
+
+
+  /** تقريب CVD/Volume Flow من Klines (taker buy vs sell) — فكرة Cryptometer */
+  function flowFromKlines(candles) {
+    if (!candles || candles.length < 8) return null;
+    // Binance kline already mapped without taker fields — need raw or recompute from qv only
+    // We store only qv; re-fetch path uses volume fields if present
+    let buyQ = 0, sellQ = 0;
+    const deltas = [];
+    for (const c of candles) {
+      // if takerBuyQuote available use it; else approximate from close vs open + volume share
+      let buy, sell;
+      if (c.tbq != null) {
+        buy = c.tbq;
+        sell = Math.max(0, c.qv - buy);
+      } else {
+        // rough proxy: bullish candle more buy pressure
+        const bull = c.c >= c.o;
+        const body = Math.abs(c.c - c.o) / (c.h - c.l || 1e-12);
+        const buyShare = bull ? 0.5 + 0.35 * body : 0.5 - 0.35 * body;
+        buy = c.qv * clamp(buyShare, 0.15, 0.85);
+        sell = c.qv - buy;
+      }
+      buyQ += buy;
+      sellQ += sell;
+      deltas.push(buy - sell);
+    }
+    let cvd = 0;
+    const cvdSeries = [];
+    for (const d of deltas) {
+      cvd += d;
+      cvdSeries.push(cvd);
+    }
+    const total = buyQ + sellQ || 1;
+    const buyRatio = buyQ / total;
+    const recent = deltas.slice(-6);
+    const older = deltas.slice(-18, -6);
+    const recentNet = recent.reduce((s, x) => s + x, 0);
+    const olderNet = older.length ? older.reduce((s, x) => s + x, 0) : 0;
+    const priceChg = candles[candles.length - 1].c / candles[Math.max(0, candles.length - 7)].c - 1;
+    const cvdChg = cvdSeries.length > 6
+      ? (cvdSeries[cvdSeries.length - 1] - cvdSeries[cvdSeries.length - 7])
+      : 0;
+    // divergence
+    let div = null;
+    if (priceChg > 0.01 && cvdChg < 0) div = "bearish"; // price up, flow down
+    if (priceChg < -0.01 && cvdChg > 0) div = "bullish"; // price down, buyers absorb
+    const strength = clamp(Math.round((buyRatio - 0.5) * 200 + (recentNet > olderNet ? 15 : -10)), -100, 100);
+    return {
+      buyQ, sellQ, buyRatio, recentNet, cvd: cvdSeries[cvdSeries.length - 1],
+      div, strength, priceChg,
+    };
   }
 
   function scoreLayers(h1, h4, d1) {
@@ -455,11 +510,12 @@
           const scored = scoreLayers(h1, h4, d1);
           const atr1h = atr(h1, 14);
           const plan = buildTradePlan(pair.price, atr1h);
+          const flow = flowFromKlines(h1);
           let whale = null;
           if (scored.passed >= 3 || scored.exitScore >= 40 || scored.investScore >= 50) {
             whale = await whaleScan(pair.symbol, state.settings.whaleMin, signal);
           }
-          return { ...pair, ...scored, whale, atr1h, plan };
+          return { ...pair, ...scored, whale, atr1h, plan, flow };
         },
         (done, total) => {
           const pct = Math.round((done / total) * 100);
@@ -486,6 +542,11 @@
         .sort((a, b) => Math.max(b.whale.buy, b.whale.sell) - Math.max(a.whale.buy, a.whale.sell))
         .slice(0, maxN);
 
+      state.flow = ok
+        .filter((x) => x.flow)
+        .sort((a, b) => Math.abs(b.flow.strength) - Math.abs(a.flow.strength) || b.quoteVolume - a.quoteVolume)
+        .slice(0, maxN);
+
       state.invest = ok
         .filter((x) => x.investScore >= 55 && x.dailyUp && x.exitScore < 50)
         .sort((a, b) => b.investScore - a.investScore || (b.change90 || 0) - (a.change90 || 0))
@@ -502,6 +563,7 @@
       setStatus(
         "فرص " + state.results.length +
         " · دخول " + state.entries.length +
+        " · تدفق " + state.flow.length +
         " · استثمار " + state.invest.length +
         " · خروج " + state.exits.length
       );
@@ -598,6 +660,63 @@
     </article>`;
   }
 
+
+  function cardFlow(row) {
+    const f = row.flow;
+    const buyPct = Math.round(f.buyRatio * 100);
+    const sellPct = 100 - buyPct;
+    const bias = f.strength >= 20 ? "شراء مسيطر" : f.strength <= -20 ? "بيع مسيطر" : "متوازن";
+    const bclass = f.strength >= 20 ? "ok" : f.strength <= -20 ? "bad" : "warn";
+    const divChip = f.div === "bullish"
+      ? '<span class="chip g">تباين صاعد (امتصاص)</span>'
+      : f.div === "bearish"
+      ? '<span class="chip r">تباين هابط (توزيع)</span>'
+      : "";
+    return `<article class="card">
+      <div class="card-h">
+        <div class="sym-block">
+          <div class="sym">${esc(row.base)}<small>/USDT</small></div>
+          ${priceBlock(row)}
+        </div>
+        <div class="badge ${bclass}">${bias}</div>
+      </div>
+      <div class="flow-bar"><div class="buy" style="width:${buyPct}%"></div></div>
+      <div class="flow-split"><span class="b">شراء ${buyPct}%</span><span class="s">بيع ${sellPct}%</span></div>
+      <div class="grid3">
+        <div class="cell"><span class="l">قوة التدفق</span><span class="v ${f.strength >= 0 ? "pos" : "neg"}">${f.strength > 0 ? "+" : ""}${f.strength}</span></div>
+        <div class="cell"><span class="l">طبقات</span><span class="v">${row.passed}/7</span></div>
+        <div class="cell"><span class="l">حجم 24س</span><span class="v">${fmtVol(row.quoteVolume)}</span></div>
+      </div>
+      <div class="chips">
+        ${divChip}
+        ${row.whale?.dominant === "buy" ? '<span class="chip g">حوت شراء</span>' : ""}
+        ${row.whale?.dominant === "sell" ? '<span class="chip r">حوت بيع</span>' : ""}
+        ${row.layers.trend ? '<span class="chip g">اتجاه</span>' : ""}
+      </div>
+      <p class="hint">تدفق أوامر تقريبي (Buy/Sell Delta + CVD) على فريم 1س — نفس فكرة Volume Flow / CVD في Cryptometer.</p>
+      ${links(row)}
+    </article>`;
+  }
+
+  function renderFlow() {
+    const p = els.panels.flow;
+    if (!p) return;
+    if (!state.flow.length) {
+      p.innerHTML = `<div class="empty">
+        <p><strong>التدفق (Order Flow)</strong> — مستوحى من Cryptometer: من يضغط أكثر، المشترون أم البائعون؟</p>
+        <ul>
+          <li><strong>شريط أخضر/أحمر:</strong> نسبة حجم الشراء العدواني مقابل البيع</li>
+          <li><strong>تباين صاعد:</strong> السعر ينزل والتدفق شراء → غالباً امتصاص (فرصة مراقبة للشراء)</li>
+          <li><strong>تباين هابط:</strong> السعر يطلع والتدفق بيع → حذر من التوزيع</li>
+          <li>الأقوى عندما يتوافق التدفق مع <strong>5/7 طبقات</strong> + حوت شراء</li>
+        </ul>
+      </div>`;
+      return;
+    }
+    p.innerHTML = state.flow.map(cardFlow).join("");
+    bindLayerButtons(p);
+  }
+
   function cardWhale(row) {
     const w = row.whale;
     const dom = w.dominant === "buy" ? "شراء" : w.dominant === "sell" ? "بيع" : "مختلط";
@@ -672,7 +791,7 @@
     root.querySelectorAll(".btn-layers").forEach((btn) => {
       btn.addEventListener("click", () => {
         const sym = btn.getAttribute("data-sym");
-        const pools = [state.results, state.entries, state.whales, state.invest, state.exits];
+        const pools = [state.results, state.entries, state.whales, state.flow, state.invest, state.exits];
         state.selected = null;
         for (const pool of pools) {
           const f = pool.find((r) => r.symbol === sym);
@@ -784,6 +903,7 @@
     renderRadar();
     renderEntry();
     renderWhales();
+    renderFlow();
     renderInvest();
     renderExit();
     renderLayers();

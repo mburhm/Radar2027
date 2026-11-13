@@ -52,7 +52,7 @@ body {
 .topbar h1 { margin: 0; font-size: 1.28rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
 .tagline { margin: 3px 0 0; font-size: 0.78rem; color: var(--muted); }
 .tabs {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
   margin-bottom: 12px; background: rgba(10,16,28,0.85);
   border: 1px solid var(--line); border-radius: 16px; padding: 6px;
 }
@@ -223,6 +223,18 @@ body {
 .field.check { flex-direction: row; align-items: flex-start; gap: 10px; color: var(--text); }
 .field.check input { margin-top: 3px; width: 18px; height: 18px; }
 @media (min-width: 520px) {
-  .tabs { grid-template-columns: repeat(6, 1fr); }
+  .tabs { grid-template-columns: repeat(7, 1fr); }
   .ly { font-size: 0.7rem; padding: 10px 3px; }
 }
+
+.flow-bar {
+  margin-top: 10px; height: 10px; border-radius: 99px; overflow: hidden;
+  display: flex; background: rgba(239,68,68,0.25);
+}
+.flow-bar .buy { background: linear-gradient(90deg, #16a34a, #22c55e); height: 100%; }
+.flow-split {
+  display: flex; justify-content: space-between; margin-top: 6px;
+  font-family: var(--mono); font-size: 0.75rem;
+}
+.flow-split .b { color: #86efac; }
+.flow-split .s { color: #fca5a5; }
