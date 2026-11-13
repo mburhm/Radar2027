@@ -42,6 +42,9 @@
       longOnly: true,
       slAtr: 1.5,
       rr: 2,
+      dipTf: "1d",
+      dipPct: 12,
+      dipLayers: 5,
     },
   };
 
@@ -62,6 +65,9 @@
     whaleMin: $("whale-min"),
     slAtr: $("sl-atr"),
     rr: $("rr"),
+    dipTf: $("dip-tf"),
+    dipPct: $("dip-pct"),
+    dipLayers: $("dip-layers"),
     exMajors: $("ex-majors"),
     longOnly: $("long-only"),
     panels: {
@@ -268,6 +274,38 @@
       buyQ, sellQ, buyRatio, recentNet, cvd: cvdSeries[cvdSeries.length - 1],
       div, strength, priceChg,
     };
+  }
+
+
+  /** نسبة الهبوط من أعلى قمة خلال نافذة حسب الفريم المختار */
+  function dropMetrics(h1, d1, weekly, dipTf) {
+    // weekly optional array of weekly candles
+    let candles;
+    let label;
+    if (dipTf === "4h") {
+      candles = h1.slice(-48); // ~2 days of 1h as proxy for recent 4h swings
+      label = "من قمة حديثة (≈4س–يومين)";
+    } else if (dipTf === "1w") {
+      candles = weekly && weekly.length ? weekly.slice(-12) : d1.slice(-60);
+      label = "من قمة أسبوعية";
+    } else if (dipTf === "1M") {
+      candles = d1.slice(-90);
+      label = "من قمة ~3 أشهر";
+    } else {
+      // 1d default
+      candles = d1.slice(-30);
+      label = "من قمة ~30 يوم";
+    }
+    if (!candles || candles.length < 5) {
+      return { dropFromHigh: null, changeWindow: null, label };
+    }
+    const closes = candles.map((x) => x.c);
+    const hi = Math.max(...candles.map((x) => x.h));
+    const last = closes[closes.length - 1];
+    const first = closes[0];
+    const dropFromHigh = hi > 0 ? (hi - last) / hi : null;
+    const changeWindow = first > 0 ? (last - first) / first : null;
+    return { dropFromHigh, changeWindow, label, high: hi, last };
   }
 
   function scoreLayers(h1, h4, d1) {
@@ -503,21 +541,23 @@
         candidates,
         3,
         async (pair) => {
-          const [h1, h4, d1] = await Promise.all([
+          const [h1, h4, d1, w1] = await Promise.all([
             klines(pair.symbol, "1h", 120, signal),
             klines(pair.symbol, "4h", 80, signal),
             klines(pair.symbol, "1d", 90, signal),
+            klines(pair.symbol, "1w", 26, signal),
           ]);
           await sleep(30 + Math.random() * 50);
           const scored = scoreLayers(h1, h4, d1);
           const atr1h = atr(h1, 14);
           const plan = buildTradePlan(pair.price, atr1h);
           const flow = flowFromKlines(h1);
+          const dip = dropMetrics(h1, d1, w1, state.settings.dipTf);
           let whale = null;
           if (scored.passed >= 3 || scored.exitScore >= 40 || scored.investScore >= 50) {
             whale = await whaleScan(pair.symbol, state.settings.whaleMin, signal);
           }
-          return { ...pair, ...scored, whale, atr1h, plan, flow };
+          return { ...pair, ...scored, whale, atr1h, plan, flow, dip };
         },
         (done, total) => {
           const pct = Math.round((done / total) * 100);
@@ -549,18 +589,20 @@
         .sort((a, b) => Math.abs(b.flow.strength) - Math.abs(a.flow.strength) || b.quoteVolume - a.quoteVolume)
         .slice(0, maxN);
 
-      // ارتداد: هبوط قوي ثم بوادر طبقات شراء (سبوت فقط)
+      // ارتداد: هبوط حسب الفريم والنسبة من الإعدادات ثم طبقات شراء
+      const minDip = (state.settings.dipPct || 12) / 100;
+      const minLy = state.settings.dipLayers || 5;
       state.rebound = ok
         .filter((x) => {
-          const drop30 = x.change30 != null ? x.change30 : 0;
-          const dropFromHigh = x.dropFromHigh30 != null ? x.dropFromHigh30 : 0;
-          const strongDip = drop30 <= -0.12 || dropFromHigh >= 0.15;
-          const recovering = x.passed >= 4 && (x.layers.trend || x.layers.mom || x.layers.struct);
-          return strongDip && recovering && x.exitScore < 70;
+          const d = x.dip;
+          if (!d || d.dropFromHigh == null) return false;
+          const strongDip = d.dropFromHigh >= minDip;
+          const recovering = x.passed >= minLy && (x.layers.trend || x.layers.mom || x.layers.struct || x.layers.smart);
+          return strongDip && recovering && x.exitScore < 75;
         })
         .sort((a, b) => {
-          const da = a.dropFromHigh30 || Math.abs(Math.min(0, a.change30 || 0));
-          const db = b.dropFromHigh30 || Math.abs(Math.min(0, b.change30 || 0));
+          const da = a.dip?.dropFromHigh || 0;
+          const db = b.dip?.dropFromHigh || 0;
           return db - da || b.passed - a.passed;
         })
         .slice(0, maxN);
@@ -737,11 +779,12 @@
 
 
   function cardRebound(row) {
+    const dip = row.dip || {};
+    const fromHi = dip.dropFromHigh;
     const drop30 = row.change30 != null ? row.change30 : null;
-    const fromHi = row.dropFromHigh30 != null ? row.dropFromHigh30 : null;
-    const dropLabel = fromHi != null ? ("−" + (fromHi * 100).toFixed(1) + "% من القمة") : fmtPct(drop30);
     const moon = row.passed >= 6 ? "قمر محتمل" : row.passed >= 5 ? "ارتداد قوي" : "مراقبة ارتداد";
     const bclass = row.passed >= 6 ? "ok" : row.passed >= 5 ? "warn" : "blue";
+    const dipLbl = dip.label || "من القمة";
     return `<article class="card">
       <div class="card-h">
         <div class="sym-block">
@@ -751,10 +794,10 @@
         <div class="badge ${bclass}">${moon}</div>
       </div>
       <div class="grid4">
-        <div class="cell"><span class="l">الهبوط من القمة</span><span class="v neg">${fromHi != null ? ("−" + (fromHi * 100).toFixed(1) + "%") : "—"}</span></div>
-        <div class="cell"><span class="l">تغيّر 30 يوم</span><span class="v ${chgClass(drop30 || 0)}">${fmtPct(drop30)}</span></div>
+        <div class="cell"><span class="l">هبوط (${esc(dipLbl)})</span><span class="v neg">${fromHi != null ? ("−" + (fromHi * 100).toFixed(1) + "%") : "—"}</span></div>
+        <div class="cell"><span class="l">تغيّر النافذة</span><span class="v ${chgClass(dip.changeWindow || 0)}">${fmtPct(dip.changeWindow)}</span></div>
         <div class="cell"><span class="l">الطبقات</span><span class="v hl">${row.passed}/7</span></div>
-        <div class="cell"><span class="l">90 يوم</span><span class="v ${chgClass(row.change90 || 0)}">${fmtPct(row.change90)}</span></div>
+        <div class="cell"><span class="l">30 يوم</span><span class="v ${chgClass(drop30 || 0)}">${fmtPct(drop30)}</span></div>
       </div>
       <div class="layers-row">${layerDots(row.layers)}</div>
       <div class="chips">
@@ -777,7 +820,7 @@
       p.innerHTML = `<div class="empty">
         <p><strong>ارتداد (شراء بعد هبوط)</strong> — عملات هبطت بقوة ثم بدأت طبقات الشراء تعود.</p>
         <ul>
-          <li>يعرض نسبة الهبوط من قمة ~30 يوم</li>
+          <li>نسبة الهبوط حسب الفريم الذي تختاره في الإعدادات (4س / يومي / أسبوعي / شهري)</li>
           <li>يشترط بوادر 4–7 طبقات (اتجاه/زخم/بنية…)</li>
           <li>مناسب لسبوت: شراء من منطقة منخفضة لا ملاحقة قمة</li>
           <li>الأفضل: 5/7+ مع تدفق شراء أو حوت شراء</li>
@@ -1005,6 +1048,9 @@
     els.whaleMin.value = state.settings.whaleMin;
     els.slAtr.value = state.settings.slAtr;
     els.rr.value = state.settings.rr;
+    if (els.dipTf) els.dipTf.value = state.settings.dipTf || "1d";
+    if (els.dipPct) els.dipPct.value = state.settings.dipPct ?? 12;
+    if (els.dipLayers) els.dipLayers.value = state.settings.dipLayers || 5;
     els.exMajors.checked = state.settings.excludeMajors;
     els.longOnly.checked = state.settings.longOnly;
   }
@@ -1012,6 +1058,9 @@
     state.settings.whaleMin = +els.whaleMin.value || 25000;
     state.settings.slAtr = +els.slAtr.value || 1.5;
     state.settings.rr = +els.rr.value || 2;
+    state.settings.dipTf = els.dipTf ? els.dipTf.value : "1d";
+    state.settings.dipPct = els.dipPct ? +els.dipPct.value || 12 : 12;
+    state.settings.dipLayers = els.dipLayers ? +els.dipLayers.value || 5 : 5;
     state.settings.excludeMajors = els.exMajors.checked;
     state.settings.longOnly = els.longOnly.checked;
     localStorage.setItem("radar-pro-v2", JSON.stringify(state.settings));

@@ -98,7 +98,7 @@ body {
   display: flex; flex-direction: column; gap: 5px;
   font-size: 0.7rem; color: var(--muted); font-weight: 500;
 }
-.filters-row select, .field input[type="number"] {
+.filters-row select, .field select, .field input[type="number"] {
   font-family: inherit; font-size: 0.88rem; color: var(--text);
   background: var(--card); border: 1px solid var(--line);
   border-radius: 12px; padding: 11px 10px; min-height: 44px; width: 100%;

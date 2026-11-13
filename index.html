@@ -109,6 +109,24 @@
     <label class="field"><span>نسبة المخاطرة/العائد (R:R)</span>
       <input type="number" id="rr" value="2" min="1" max="5" step="0.5">
     </label>
+    <label class="field"><span>فريم قياس الهبوط (تبويب ارتداد)</span>
+      <select id="dip-tf">
+        <option value="4h">4 ساعات</option>
+        <option value="1d" selected>يومي (~7–30 يوم)</option>
+        <option value="1w">أسبوعي</option>
+        <option value="1M">شهري (~30–90 يوم)</option>
+      </select>
+    </label>
+    <label class="field"><span>حد أدنى لنسبة الهبوط %</span>
+      <input type="number" id="dip-pct" value="12" min="3" max="60" step="1">
+    </label>
+    <label class="field"><span>حد أدنى للطبقات في الارتداد</span>
+      <select id="dip-layers">
+        <option value="4">4/7+</option>
+        <option value="5" selected>5/7+</option>
+        <option value="6">6/7+</option>
+      </select>
+    </label>
     <label class="field check">
       <input type="checkbox" id="ex-majors" checked>
       <span>استبعاد BTC / ETH من الفرص</span>
